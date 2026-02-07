@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Energy Runner — Final Stable Build</title>
+  <style>
+    body {
+      margin: 0;
+      background: #0f1220;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    canvas {
+      border-radius: 12px;
+      box-shadow: 0 0 25px rgba(0,0,0,0.6);
+      outline: none;
+    }
+  </style>
+</head>
+<body>
+<canvas id="game" width="800" height="400" tabindex="0"></canvas>
+
+<script>
+// ================== CORE SETUP ==================
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+canvas.focus();
+
+// Unlock audio on first interaction
+let audioUnlocked = false;
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function beep(freq, dur = 0.12) {
+  if (!audioUnlocked) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.frequency.value = freq;
+  osc.type = "square";
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+  osc.stop(audioCtx.currentTime + dur);
+}
+
+// ================== GAME STATE ==================
+let gravity = 0.6;
+let speed = 4;
+let score = 0;
+let hearts = 5;
+let gameOver = false;
+
+let popupActive = false;
+let popupType = null; // 'fossil' | 'renewable'
+let currentFact = "";
+
+let fossilHits = 0;
+let cleanEnergyCollected = 0;
+let fossilCooldown = 0;
+let renewableTimer = 0;
+
+const FOSSIL_FACTS = [
+  "Burning fossil fuels causes over 75% of global greenhouse gas emissions.",
+  "Air pollution from fossil fuels kills millions prematurely every year.",
+  "Oil spills destroy marine life for decades.",
+  "Coal power plants are one of the largest sources of toxic air pollution.",
+  "Fossil fuel dependence accelerates climate disasters worldwide."
+];
+
+const RENEWABLE_FACTS = [
+  "Solar power generates electricity without air or water pollution.",
+  "Wind energy uses almost no water compared to fossil fuels.",
+  "Renewables create more long-term jobs than fossil fuel industries.",
+  "Clean energy reduces climate risks and protects ecosystems.",
+  "A renewable-powered world is healthier, safer, and sustainable."
+];
+
+// ================== PLAYER ==================
+const player = {
+  x: 80,
+  y: 300,
+  w: 32,
+  h: 32,
+  vy: 0,
+  jumpPower: -12,
+  grounded: true
+};
+
+let tokens = [];
+let fossils = [];
+
+// ================== INPUT ==================
+document.addEventListener("keydown", e => {
+  if (["Space", "ArrowUp"].includes(e.code)) e.preventDefault();
+  if (!audioUnlocked) {
+    audioCtx.resume();
+    audioUnlocked = true;
+  }
+
+  if (popupActive && e.code === "Space") {
+    popupActive = false;
+    popupType = null;
+    return;
+  }
+
+  if ((e.code === "Space" || e.code === "ArrowUp") && player.grounded && !gameOver && !popupActive) {
+    player.vy = player.jumpPower;
+    player.grounded = false;
+    beep(420);
+  }
+
+  if (e.code === "KeyR" && gameOver) resetGame();
+});
+
+// ================== SPAWNERS ==================
+function spawnToken() {
+  tokens.push({ x: canvas.width, y: 330, w: 28, h: 28 });
+}
+
+function spawnFossil() {
+  fossils.push({ x: canvas.width, y: 305, w: 36, h: 36 });
+}
+
+function resetGame() {
+  score = 0;
+  hearts = 5;
+  speed = 4;
+  tokens = [];
+  fossils = [];
+  fossilHits = 0;
+  cleanEnergyCollected = 0;
+  fossilCooldown = 0;
+  renewableTimer = 0;
+  popupActive = false;
+  popupType = null;
+  gameOver = false;
+}
+
+// ================== UPDATE ==================
+function update() {
+  if (gameOver || popupActive) return;
+
+  fossilCooldown--;
+  renewableTimer++;
+
+  if (renewableTimer > 1200) {
+    renewableTimer = 0;
+    popupType = "renewable";
+    currentFact = RENEWABLE_FACTS[Math.floor(Math.random() * RENEWABLE_FACTS.length)];
+    popupActive = true;
+  }
+
+  player.vy += gravity;
+  player.y += player.vy;
+
+  if (player.y >= 300) {
+    player.y = 300;
+    player.vy = 0;
+    player.grounded = true;
+  }
+
+  if (Math.random() < 0.025) spawnToken();
+
+  if (fossilCooldown <= 0 && Math.random() < 0.007) {
+    spawnFossil();
+    fossilCooldown = 90;
+  }
+
+  // Tokens
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const t = tokens[i];
+    t.x -= speed;
+    if (player.x < t.x + t.w && player.x + player.w > t.x && player.y < t.y + t.h && player.y + player.h > t.y) {
+      tokens.splice(i, 1);
+      score += 10;
+      cleanEnergyCollected++;
+      speed += 0.05;
+      beep(720);
+    }
+  }
+
+  // Fossils
+  for (let i = fossils.length - 1; i >= 0; i--) {
+    const f = fossils[i];
+    f.x -= speed;
+    if (player.x < f.x + f.w && player.x + player.w > f.x && player.y < f.y + f.h && player.y + player.h > f.y) {
+      fossils.splice(i, 1);
+      hearts--;
+      fossilHits++;
+      beep(140, 0.25);
+      popupType = "fossil";
+      currentFact = FOSSIL_FACTS[Math.floor(Math.random() * FOSSIL_FACTS.length)];
+      popupActive = true;
+      if (hearts <= 0) gameOver = true;
+    }
+  }
+
+  tokens = tokens.filter(t => t.x > -50);
+  fossils = fossils.filter(f => f.x > -50);
+}
+
+// ================== DRAW ==================
+function drawBackground() {
+  const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  if (popupType === "fossil" && popupActive) {
+    g.addColorStop(0, "#3b0f0f");
+    g.addColorStop(1, "#0f1b0f");
+  } else {
+    g.addColorStop(0, "#7ec8e3");
+    g.addColorStop(1, "#dff6ff");
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#4c7a4a";
+  ctx.fillRect(0, 340, canvas.width, 60);
+}
+
+function draw() {
+  drawBackground();
+
+  ctx.font = "32px serif";
+  ctx.fillText("🧑", player.x, player.y + 28);
+
+  ctx.font = "28px serif";
+  tokens.forEach(t => ctx.fillText("🍃", t.x, t.y + 24));
+
+  ctx.font = "30px serif";
+  fossils.forEach(f => ctx.fillText("🛢️", f.x, f.y + 30));
+
+  ctx.fillStyle = "white";
+  ctx.font = "18px Arial";
+  ctx.fillText("Energy: " + score, 20, 30);
+  ctx.fillText("❤ ".repeat(hearts), 20, 55);
+
+  if (popupActive) {
+    ctx.fillStyle = "rgba(0,0,0,0.8)";
+    ctx.fillRect(80, 80, 640, 180);
+    ctx.strokeStyle = popupType === "fossil" ? "#ff5555" : "#55ff88";
+    ctx.strokeRect(80, 80, 640, 180);
+    ctx.fillStyle = "white";
+    ctx.font = "20px Arial";
+    ctx.fillText(popupType === "fossil" ? "Environmental Damage" : "Clean Energy Insight", 270, 120);
+    ctx.font = "16px Arial";
+    ctx.fillText(currentFact, 120, 170);
+    ctx.fillText("Press SPACE to continue", 300, 235);
+  }
+
+  if (gameOver) {
+    ctx.fillStyle = "rgba(0,0,0,0.85)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "white";
+    ctx.font = "32px Arial";
+    ctx.fillText("GAME OVER", 280, 110);
+    ctx.font = "18px Arial";
+    ctx.fillText(`Clean Energy Collected: ${cleanEnergyCollected}`, 250, 170);
+    ctx.fillText(`Fossil Fuel Impacts: ${fossilHits}`, 250, 200);
+    ctx.fillText("Your choices shaped this world.", 250, 240);
+    ctx.fillText("Press R to Restart", 300, 290);
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
